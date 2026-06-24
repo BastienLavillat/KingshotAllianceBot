@@ -16,6 +16,8 @@ const GIFT_CODE_CHANNEL_ID  = "1516080050250715237";   // channel to post gift c
 const SENT_CODES_FILE       = "sent_codes.json";
 // ============================================================
 
+console.log("BOT_TOKEN present:", !!process.env.BOT_TOKEN);
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
