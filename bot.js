@@ -14,6 +14,8 @@ const UNVERIFIED_ROLE_ID    = "1516820807295307806";   // role assigned on join,
 const DB_FILE               = "members_info.json";
 const GIFT_CODE_CHANNEL_ID  = "1516080050250715237";   // channel to post gift codes — set to null to disable
 const SENT_CODES_FILE       = "sent_codes.json";
+const REMINDER_CHANNEL_ID   = null;                    // channel to post event reminders — set to null to disable
+const REMINDER_INTERVALS_MIN = [1440, 60, 15];         // minutes before event start to send reminders (1440 = 24h, 60 = 1h, 15 = 15min)
 // ============================================================
 
 console.log("BOT_TOKEN present:", !!process.env.BOT_TOKEN);
@@ -24,12 +26,16 @@ const client = new Client({
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildScheduledEvents,
   ],
 });
 
 // Tracks members currently in the verification process
 // userId → channelId
 const PENDING = new Map();
+
+// Tracks scheduled reminder timeouts: eventId → [timeoutId, ...]
+const reminderTimeouts = new Map();
 
 // ─────────────────────────────────────────────
 //  JSON helpers
@@ -296,10 +302,111 @@ cron.schedule("0 9 * * *", async () => {
 });
 
 // ─────────────────────────────────────────────
+//  Event reminders — scheduled via setTimeout
+// ─────────────────────────────────────────────
+function formatIntervalLabel(intervalMin) {
+  if (intervalMin >= 1440) return `${intervalMin / 1440} day(s)`;
+  if (intervalMin >= 60)   return `${intervalMin / 60} hour(s)`;
+  return `${intervalMin} minute(s)`;
+}
+
+function scheduleEventReminders(event) {
+  if (!REMINDER_CHANNEL_ID) return;
+  if (!event.scheduledStartTimestamp) return;
+  if (event.status !== 1 /* SCHEDULED */) return;
+
+  // Cancel any existing timeouts for this event before (re)scheduling
+  cancelEventReminders(event.id);
+
+  const now = Date.now();
+  const timeouts = [];
+
+  for (const intervalMin of REMINDER_INTERVALS_MIN) {
+    const delay = event.scheduledStartTimestamp - intervalMin * 60 * 1_000 - now;
+    if (delay <= 0) continue; // reminder time already passed
+
+    const label = formatIntervalLabel(intervalMin);
+    const capturedName        = event.name;
+    const capturedDescription = event.description;
+    const capturedStartTs     = event.scheduledStartTimestamp;
+    const capturedId          = event.id;
+
+    const timeoutId = setTimeout(async () => {
+      try {
+        const guild = await client.guilds.fetch(GUILD_ID);
+        const channel = guild.channels.cache.get(REMINDER_CHANNEL_ID);
+        if (!channel) return;
+
+        // Re-fetch to confirm the event is still scheduled
+        const liveEvent = await guild.scheduledEvents.fetch(capturedId).catch(() => null);
+        if (!liveEvent || liveEvent.status !== 1 /* SCHEDULED */) return;
+
+        await channel.send({
+          content:
+            `@everyone ⏰ **Reminder:** **${capturedName}** starts in **${label}**!\n` +
+            (capturedDescription ? `> ${capturedDescription}\n` : "") +
+            `🗓️ <t:${Math.floor(capturedStartTs / 1000)}:F>`,
+          allowedMentions: { parse: ["everyone"] },
+        });
+
+        console.log(`Sent reminder for "${capturedName}" (${label} before).`);
+      } catch (err) {
+        console.error(`Failed to send reminder for "${capturedName}":`, err);
+      }
+    }, delay);
+
+    timeouts.push(timeoutId);
+    const minutesUntilFire = Math.round(delay / 60_000);
+    console.log(`Scheduled reminder for "${event.name}" in ${minutesUntilFire} min (${label} before start).`);
+  }
+
+  if (timeouts.length > 0) reminderTimeouts.set(event.id, timeouts);
+}
+
+function cancelEventReminders(eventId) {
+  const timeouts = reminderTimeouts.get(eventId);
+  if (!timeouts) return;
+  timeouts.forEach(clearTimeout);
+  reminderTimeouts.delete(eventId);
+  console.log(`Cancelled reminders for event ${eventId}.`);
+}
+
+// Schedule reminders when a new event is created
+client.on("guildScheduledEventCreate", (event) => {
+  scheduleEventReminders(event);
+});
+
+// Reschedule if the event is updated (time changed), cancel if it's cancelled
+client.on("guildScheduledEventUpdate", (oldEvent, newEvent) => {
+  if (newEvent.status === 3 /* COMPLETED */ || newEvent.status === 4 /* CANCELLED */) {
+    cancelEventReminders(newEvent.id);
+  } else if (oldEvent.scheduledStartTimestamp !== newEvent.scheduledStartTimestamp) {
+    scheduleEventReminders(newEvent); // reschedule with updated time
+  }
+});
+
+// Cancel reminders if the event is deleted
+client.on("guildScheduledEventDelete", (event) => {
+  cancelEventReminders(event.id);
+});
+
+// ─────────────────────────────────────────────
 //  Ready
 // ─────────────────────────────────────────────
-client.once("clientReady", () => {
+client.once("clientReady", async () => {
   console.log(`✅ Bot ready as ${client.user.tag}`);
+
+  // Recover reminders for events that existed before the bot started
+  if (REMINDER_CHANNEL_ID) {
+    try {
+      const guild = await client.guilds.fetch(GUILD_ID);
+      const events = await guild.scheduledEvents.fetch();
+      for (const [, event] of events) scheduleEventReminders(event);
+      console.log(`Scheduled reminders for ${events.size} existing event(s).`);
+    } catch (err) {
+      console.error("Failed to recover event reminders on startup:", err);
+    }
+  }
 });
 
 client.login(BOT_TOKEN);
