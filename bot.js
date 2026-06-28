@@ -1,5 +1,5 @@
 require("dotenv").config();
-const { Client, GatewayIntentBits } = require("discord.js");
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
 const cron = require("node-cron");
 const fs = require("fs");
 
@@ -14,8 +14,7 @@ const UNVERIFIED_ROLE_ID    = "1516820807295307806";   // role assigned on join,
 const DB_FILE               = "members_info.json";
 const GIFT_CODE_CHANNEL_ID  = "1516080050250715237";   // channel to post gift codes — set to null to disable
 const SENT_CODES_FILE       = "sent_codes.json";
-const REMINDER_CHANNEL_ID   = "1520880291470639256";                    // channel to post event reminders — set to null to disable
-const REMINDER_INTERVALS_MIN = [1440, 60, 15];         // minutes before event start to send reminders (1440 = 24h, 60 = 1h, 15 = 15min)
+const REMINDER_CONFIG_FILE  = "reminder_config.json";  // persisted reminder settings (edit via /reminder slash commands)
 // ============================================================
 
 console.log("BOT_TOKEN present:", !!process.env.BOT_TOKEN);
@@ -56,6 +55,15 @@ function loadSentCodes() {
 
 function saveSentCodes(codes) {
   fs.writeFileSync(SENT_CODES_FILE, JSON.stringify([...codes], null, 2));
+}
+
+function loadReminderConfig() {
+  if (!fs.existsSync(REMINDER_CONFIG_FILE)) return { channelId: null, intervals: [1440, 60, 15] };
+  return JSON.parse(fs.readFileSync(REMINDER_CONFIG_FILE, "utf-8"));
+}
+
+function saveReminderConfig(config) {
+  fs.writeFileSync(REMINDER_CONFIG_FILE, JSON.stringify(config, null, 2));
 }
 
 // ─────────────────────────────────────────────
@@ -311,7 +319,8 @@ function formatIntervalLabel(intervalMin) {
 }
 
 function scheduleEventReminders(event) {
-  if (!REMINDER_CHANNEL_ID) return;
+  const { channelId, intervals } = loadReminderConfig();
+  if (!channelId) return;
   if (!event.scheduledStartTimestamp) return;
   if (event.status !== 1 /* SCHEDULED */) return;
 
@@ -321,20 +330,21 @@ function scheduleEventReminders(event) {
   const now = Date.now();
   const timeouts = [];
 
-  for (const intervalMin of REMINDER_INTERVALS_MIN) {
+  for (const intervalMin of intervals) {
     const delay = event.scheduledStartTimestamp - intervalMin * 60 * 1_000 - now;
     if (delay <= 0) continue; // reminder time already passed
 
-    const label = formatIntervalLabel(intervalMin);
+    const label              = formatIntervalLabel(intervalMin);
     const capturedName        = event.name;
     const capturedDescription = event.description;
     const capturedStartTs     = event.scheduledStartTimestamp;
     const capturedId          = event.id;
+    const capturedChannelId   = channelId; // capture now; config may change later
 
     const timeoutId = setTimeout(async () => {
       try {
         const guild = await client.guilds.fetch(GUILD_ID);
-        const channel = guild.channels.cache.get(REMINDER_CHANNEL_ID);
+        const channel = guild.channels.cache.get(capturedChannelId);
         if (!channel) return;
 
         // Re-fetch to confirm the event is still scheduled
@@ -391,21 +401,126 @@ client.on("guildScheduledEventDelete", (event) => {
 });
 
 // ─────────────────────────────────────────────
+//  Slash commands — /reminder
+// ─────────────────────────────────────────────
+const reminderCommand = new SlashCommandBuilder()
+  .setName("reminder")
+  .setDescription("Configure event reminders")
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+  .addSubcommand((sub) =>
+    sub
+      .setName("channel")
+      .setDescription("Set the channel where reminders are posted")
+      .addChannelOption((opt) =>
+        opt.setName("channel").setDescription("The target channel").setRequired(true)
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("intervals")
+      .setDescription("Set reminder intervals (minutes before event start)")
+      .addStringOption((opt) =>
+        opt
+          .setName("minutes")
+          .setDescription("Space or comma-separated positive integers, e.g. 1440 60 15")
+          .setRequired(true)
+      )
+  )
+  .addSubcommand((sub) =>
+    sub.setName("status").setDescription("Show current reminder configuration")
+  )
+  .addSubcommand((sub) =>
+    sub.setName("disable").setDescription("Disable event reminders")
+  );
+
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isChatInputCommand() || interaction.commandName !== "reminder") return;
+
+  const sub = interaction.options.getSubcommand();
+  const config = loadReminderConfig();
+
+  if (sub === "channel") {
+    const ch = interaction.options.getChannel("channel");
+    config.channelId = ch.id;
+    saveReminderConfig(config);
+    const guild = await client.guilds.fetch(GUILD_ID);
+    const events = await guild.scheduledEvents.fetch();
+    for (const [, event] of events) scheduleEventReminders(event);
+    return interaction.reply({
+      content: `✅ Reminders will now be posted in <#${ch.id}>.`,
+      ephemeral: true,
+    });
+  }
+
+  if (sub === "intervals") {
+    const raw = interaction.options.getString("minutes");
+    const parsed = raw
+      .split(/[\s,]+/)
+      .map(Number)
+      .filter((n) => Number.isInteger(n) && n > 0);
+    if (parsed.length === 0) {
+      return interaction.reply({
+        content: "⚠️ No valid intervals found. Provide positive integers separated by spaces or commas.",
+        ephemeral: true,
+      });
+    }
+    parsed.sort((a, b) => b - a);
+    config.intervals = parsed;
+    saveReminderConfig(config);
+    const guild = await client.guilds.fetch(GUILD_ID);
+    const events = await guild.scheduledEvents.fetch();
+    for (const [, event] of events) scheduleEventReminders(event);
+    return interaction.reply({
+      content: `✅ Reminder intervals set to: **${parsed.map(formatIntervalLabel).join(", ")}**.`,
+      ephemeral: true,
+    });
+  }
+
+  if (sub === "status") {
+    const channelMention = config.channelId ? `<#${config.channelId}>` : "*(disabled)*";
+    const intervalLabels = config.intervals.length
+      ? config.intervals.map(formatIntervalLabel).join(", ")
+      : "*(none)*";
+    return interaction.reply({
+      content: `📋 **Reminder config:**\n• Channel: ${channelMention}\n• Intervals: ${intervalLabels}`,
+      ephemeral: true,
+    });
+  }
+
+  if (sub === "disable") {
+    config.channelId = null;
+    saveReminderConfig(config);
+    reminderTimeouts.forEach((timeouts) => timeouts.forEach(clearTimeout));
+    reminderTimeouts.clear();
+    return interaction.reply({ content: "🔕 Reminders disabled.", ephemeral: true });
+  }
+});
+
+// ─────────────────────────────────────────────
 //  Ready
 // ─────────────────────────────────────────────
 client.once("clientReady", async () => {
   console.log(`✅ Bot ready as ${client.user.tag}`);
 
-  // Recover reminders for events that existed before the bot started
-  if (REMINDER_CHANNEL_ID) {
-    try {
-      const guild = await client.guilds.fetch(GUILD_ID);
-      const events = await guild.scheduledEvents.fetch();
-      for (const [, event] of events) scheduleEventReminders(event);
-      console.log(`Scheduled reminders for ${events.size} existing event(s).`);
-    } catch (err) {
-      console.error("Failed to recover event reminders on startup:", err);
-    }
+  // Register guild slash commands
+  try {
+    const rest = new REST().setToken(BOT_TOKEN);
+    await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), {
+      body: [reminderCommand.toJSON()],
+    });
+    console.log("Slash commands registered.");
+  } catch (err) {
+    console.error("Failed to register slash commands:", err);
+  }
+
+  // Recover reminders for events that already existed when the bot started
+  try {
+    const guild = await client.guilds.fetch(GUILD_ID);
+    const events = await guild.scheduledEvents.fetch();
+    for (const [, event] of events) scheduleEventReminders(event);
+    console.log(`Scheduled reminders for ${events.size} existing event(s).`);
+  } catch (err) {
+    console.error("Failed to recover event reminders on startup:", err);
   }
 });
 
