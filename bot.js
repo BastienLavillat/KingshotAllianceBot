@@ -14,7 +14,7 @@ const UNVERIFIED_ROLE_ID    = "1516820807295307806";   // role assigned on join,
 const DB_FILE               = "members_info.json";
 const GIFT_CODE_CHANNEL_ID  = "1516080050250715237";   // channel to post gift codes — set to null to disable
 const SENT_CODES_FILE       = "sent_codes.json";
-const REMINDER_CHANNEL_ID   = null;                    // channel to post event reminders — set to null to disable
+const REMINDER_CHANNEL_ID   = "1520880291470639256";                    // channel to post event reminders — set to null to disable
 const REMINDER_INTERVALS_MIN = [1440, 60, 15];         // minutes before event start to send reminders (1440 = 24h, 60 = 1h, 15 = 15min)
 // ============================================================
 
