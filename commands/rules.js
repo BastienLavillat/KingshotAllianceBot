@@ -6,17 +6,15 @@ function buildRulesMessages() {
   if (!fs.existsSync(DISCORD_RULES_FILE)) throw new Error(`Rules file not found: ${DISCORD_RULES_FILE}`);
   const raw      = fs.readFileSync(DISCORD_RULES_FILE, "utf-8");
   const sections = raw.split(/^---$/m).map((s) => s.trim()).filter(Boolean);
-  const colors   = [0xF5A623, 0xE74C3C, 0x3498DB, 0x2ECC71, 0x9B59B6];
 
   return sections.map((section, i) => {
     const newlineIdx = section.indexOf("\n");
     const title      = (newlineIdx === -1 ? section : section.slice(0, newlineIdx)).trim();
     const body       = (newlineIdx === -1 ? "" : section.slice(newlineIdx + 1)).trim();
 
-    const embed = new EmbedBuilder().setColor(colors[i] ?? 0x95A5A6);
+    const embed = new EmbedBuilder().setColor(0x3498DB);
     if (title) embed.setTitle(title);
     if (body)  embed.setDescription(body);
-    if (i === sections.length - 1) embed.setFooter({ text: "Kingshot Alliance" });
 
     return { embeds: [embed] };
   });
