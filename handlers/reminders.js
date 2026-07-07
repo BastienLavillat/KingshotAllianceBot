@@ -32,16 +32,26 @@ function scheduleEventReminders(event, client) {
       try {
         const guild = await client.guilds.fetch(GUILD_ID);
         const channel = guild.channels.cache.get(capturedChannelId);
-        if (!channel) return;
+        if (!channel) {
+          console.error(`Reminder dropped for "${capturedName}" (${label} before): channel ${capturedChannelId} not found in cache.`);
+          return;
+        }
 
         // Re-fetch to confirm the event is still scheduled
-        const liveEvent = await guild.scheduledEvents.fetch(capturedId).catch(() => null);
-        if (!liveEvent || liveEvent.status !== 1 /* SCHEDULED */) return;
+        const liveEvent = await guild.scheduledEvents.fetch(capturedId).catch((err) => {
+          console.error(`Reminder dropped for "${capturedName}" (${label} before): failed to fetch event — ${err.message}`);
+          return null;
+        });
+        if (!liveEvent) return;
+        if (liveEvent.status !== 1 /* SCHEDULED */) {
+          console.warn(`Reminder skipped for "${capturedName}" (${label} before): event status is ${liveEvent.status} (not Scheduled).`);
+          return;
+        }
 
         await channel.send({
           content:
             `@everyone ⏰ **Reminder:** **${capturedName}** starts in **${label}**!\n` +
-            (capturedDescription ? `> ${capturedDescription}\n` : "") +
+            (capturedDescription ? capturedDescription.split("\n").map(line => `> ${line}`).join("\n") + "\n" : "") +
             `🗓️ <t:${Math.floor(capturedStartTs / 1000)}:F>`,
           allowedMentions: { parse: ["everyone"] },
         });
@@ -57,7 +67,11 @@ function scheduleEventReminders(event, client) {
     console.log(`Scheduled reminder for "${event.name}" in ${minutesUntilFire} min (${label} before start).`);
   }
 
-  if (timeouts.length > 0) reminderTimeouts.set(event.id, timeouts);
+  if (timeouts.length > 0) {
+    reminderTimeouts.set(event.id, timeouts);
+  } else {
+    console.warn(`No reminders scheduled for "${event.name}": all intervals have already passed or the event starts in less than ${Math.min(...intervals)} minute(s).`);
+  }
 }
 
 function cancelEventReminders(eventId) {
