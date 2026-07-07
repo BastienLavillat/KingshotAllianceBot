@@ -26,7 +26,7 @@ function saveSentCodes(codes) {
 }
 
 function loadReminderConfig() {
-  if (!fs.existsSync(REMINDER_CONFIG_FILE)) return { channelId: null, intervals: [1440, 60, 15] };
+  if (!fs.existsSync(REMINDER_CONFIG_FILE)) return { intervals: [1440, 60, 15] };
   return JSON.parse(fs.readFileSync(REMINDER_CONFIG_FILE, "utf-8"));
 }
 

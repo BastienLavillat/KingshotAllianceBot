@@ -1,4 +1,4 @@
-const { GUILD_ID } = require("../config");
+const { GUILD_ID, REMINDER_CHANNEL_ID } = require("../config");
 const { loadReminderConfig } = require("../utils/db");
 const { formatIntervalLabel } = require("../utils/eventHelpers");
 
@@ -6,8 +6,8 @@ const { formatIntervalLabel } = require("../utils/eventHelpers");
 const reminderTimeouts = new Map();
 
 function scheduleEventReminders(event, client) {
-  const { channelId, intervals } = loadReminderConfig();
-  if (!channelId) return;
+  const { intervals } = loadReminderConfig();
+  if (!REMINDER_CHANNEL_ID) return;
   if (!event.scheduledStartTimestamp) return;
   if (event.status !== 1 /* SCHEDULED */) return;
 
@@ -26,7 +26,7 @@ function scheduleEventReminders(event, client) {
     const capturedDescription = event.description;
     const capturedStartTs     = event.scheduledStartTimestamp;
     const capturedId          = event.id;
-    const capturedChannelId   = channelId; // capture now; config may change later
+    const capturedChannelId   = REMINDER_CHANNEL_ID;
 
     const timeoutId = setTimeout(async () => {
       try {
