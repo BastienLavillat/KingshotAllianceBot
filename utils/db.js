@@ -1,4 +1,5 @@
 const fs = require("fs");
+const path = require("path");
 const {
   DB_FILE,
   SENT_CODES_FILE,
@@ -7,48 +8,72 @@ const {
   RECURRING_EVENTS_FILE,
 } = require("../config");
 
+function ensureParentDir(filePath) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+}
+
+function ensureJsonFile(filePath, defaultValue) {
+  ensureParentDir(filePath);
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(filePath, JSON.stringify(defaultValue, null, 2));
+  }
+}
+
+function ensureTextFile(filePath, defaultValue = "") {
+  ensureParentDir(filePath);
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(filePath, defaultValue);
+  }
+}
+
 function loadData() {
-  if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, "{}");
+  ensureJsonFile(DB_FILE, {});
   return JSON.parse(fs.readFileSync(DB_FILE, "utf-8"));
 }
 
 function saveData(data) {
+  ensureParentDir(DB_FILE);
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 }
 
 function loadSentCodes() {
+  ensureJsonFile(SENT_CODES_FILE, []);
   if (!fs.existsSync(SENT_CODES_FILE)) return new Set();
   return new Set(JSON.parse(fs.readFileSync(SENT_CODES_FILE, "utf-8")));
 }
 
 function saveSentCodes(codes) {
+  ensureParentDir(SENT_CODES_FILE);
   fs.writeFileSync(SENT_CODES_FILE, JSON.stringify([...codes], null, 2));
 }
 
 function loadReminderConfig() {
-  if (!fs.existsSync(REMINDER_CONFIG_FILE)) return { intervals: [1440, 60, 15] };
+  ensureJsonFile(REMINDER_CONFIG_FILE, { intervals: [1440, 60, 15] });
   return JSON.parse(fs.readFileSync(REMINDER_CONFIG_FILE, "utf-8"));
 }
 
 function saveReminderConfig(config) {
+  ensureParentDir(REMINDER_CONFIG_FILE);
   fs.writeFileSync(REMINDER_CONFIG_FILE, JSON.stringify(config, null, 2));
 }
 
 function loadEventTemplates() {
-  if (!fs.existsSync(EVENT_TEMPLATES_FILE)) return {};
+  ensureJsonFile(EVENT_TEMPLATES_FILE, {});
   return JSON.parse(fs.readFileSync(EVENT_TEMPLATES_FILE, "utf-8"));
 }
 
 function saveEventTemplates(data) {
+  ensureParentDir(EVENT_TEMPLATES_FILE);
   fs.writeFileSync(EVENT_TEMPLATES_FILE, JSON.stringify(data, null, 2));
 }
 
 function loadRecurringEvents() {
-  if (!fs.existsSync(RECURRING_EVENTS_FILE)) return {};
+  ensureJsonFile(RECURRING_EVENTS_FILE, {});
   return JSON.parse(fs.readFileSync(RECURRING_EVENTS_FILE, "utf-8"));
 }
 
 function saveRecurringEvents(data) {
+  ensureParentDir(RECURRING_EVENTS_FILE);
   fs.writeFileSync(RECURRING_EVENTS_FILE, JSON.stringify(data, null, 2));
 }
 
