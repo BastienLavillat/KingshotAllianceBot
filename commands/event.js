@@ -7,8 +7,28 @@ const {
   loadRecurringEvents,
   saveRecurringEvents,
 } = require("../utils/db");
-const { parseUtcDatetime, createDiscordEvent, formatIntervalDays } = require("../utils/eventHelpers");
+const { parseUtcDatetime, createDiscordEvent, formatIntervalDays, refreshTemplatesChannel } = require("../utils/eventHelpers");
+const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require("discord.js");
 const { checkAndCreateRecurringEvents } = require("../handlers/recurring");
+
+function normalizeMultilineText(value) {
+  if (typeof value !== "string") return value;
+  return value.replace(/\\n/g, "\n");
+}
+
+function getNextHourUtcString() {
+  const now = new Date();
+  const nextHour = new Date(now);
+  nextHour.setUTCMinutes(0, 0, 0);
+  nextHour.setUTCHours(nextHour.getUTCHours() + 1);
+
+  const year = nextHour.getUTCFullYear();
+  const month = String(nextHour.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(nextHour.getUTCDate()).padStart(2, "0");
+  const hour = String(nextHour.getUTCHours()).padStart(2, "0");
+
+  return `${year}-${month}-${day} ${hour}:00`;
+}
 
 const eventCommand = new SlashCommandBuilder()
   .setName("event")
@@ -29,7 +49,10 @@ const eventCommand = new SlashCommandBuilder()
         opt.setName("name").setDescription("Event name (overrides template)").setRequired(false)
       )
       .addStringOption((opt) =>
-        opt.setName("description").setDescription("Description (overrides template)").setRequired(false)
+        opt
+          .setName("description")
+          .setDescription("Description (overrides template). Use \\n for new line")
+          .setRequired(false)
       )
       .addIntegerOption((opt) =>
         opt.setName("duration").setDescription("Duration in minutes (overrides template)").setRequired(false).setMinValue(1)
@@ -54,7 +77,10 @@ const eventCommand = new SlashCommandBuilder()
             opt.setName("duration").setDescription("Duration in minutes").setRequired(true).setMinValue(1)
           )
           .addStringOption((opt) =>
-            opt.setName("description").setDescription("Event description").setRequired(false)
+            opt
+              .setName("description")
+              .setDescription("Event description. Use \\n for new line")
+              .setRequired(false)
           )
           .addStringOption((opt) =>
             opt.setName("location").setDescription("Location (default: TBD)").setRequired(false)
@@ -98,7 +124,10 @@ const eventCommand = new SlashCommandBuilder()
             opt.setName("name").setDescription("Event name (overrides template)").setRequired(false)
           )
           .addStringOption((opt) =>
-            opt.setName("description").setDescription("Description (overrides template)").setRequired(false)
+            opt
+              .setName("description")
+              .setDescription("Description (overrides template). Use \\n for new line")
+              .setRequired(false)
           )
           .addIntegerOption((opt) =>
             opt.setName("duration").setDescription("Duration in minutes (overrides template)").setRequired(false).setMinValue(1)
@@ -176,7 +205,7 @@ async function handleEventCommand(interaction, client) {
     }
 
     name            = interaction.options.getString("name")        ?? name;
-    description     = interaction.options.getString("description") ?? description ?? "";
+    description     = normalizeMultilineText(interaction.options.getString("description") ?? description ?? "");
     durationMinutes = interaction.options.getInteger("duration")   ?? durationMinutes;
     location        = interaction.options.getString("location")    ?? location ?? "TBD";
 
@@ -204,13 +233,14 @@ async function handleEventCommand(interaction, client) {
   if (group === "template" && sub === "save") {
     const rawName         = interaction.options.getString("name");
     const durationMinutes = interaction.options.getInteger("duration");
-    const description     = interaction.options.getString("description") ?? "";
+    const description     = normalizeMultilineText(interaction.options.getString("description") ?? "");
     const location        = interaction.options.getString("location")    ?? "TBD";
 
     const key       = rawName.toLowerCase().replace(/\s+/g, "_");
     const templates = loadEventTemplates();
     templates[key]  = { name: rawName, description, durationMinutes, location };
     saveEventTemplates(templates);
+    refreshTemplatesChannel(client, templates).catch(console.error);
 
     return interaction.reply({
       content: `✅ Template \`${key}\` saved (**${rawName}**, ${durationMinutes} min, ${location}).`,
@@ -238,6 +268,7 @@ async function handleEventCommand(interaction, client) {
     const displayName = templates[key].name;
     delete templates[key];
     saveEventTemplates(templates);
+    refreshTemplatesChannel(client, templates).catch(console.error);
     return interaction.reply({ content: `🗑️ Template \`${key}\` (**${displayName}**) deleted.`, ephemeral: true });
   }
 
@@ -256,7 +287,7 @@ async function handleEventCommand(interaction, client) {
     }
 
     name            = interaction.options.getString("name")        ?? name;
-    description     = interaction.options.getString("description") ?? description ?? "";
+    description     = normalizeMultilineText(interaction.options.getString("description") ?? description ?? "");
     durationMinutes = interaction.options.getInteger("duration")   ?? durationMinutes;
     location        = interaction.options.getString("location")    ?? location ?? "TBD";
 
@@ -324,4 +355,68 @@ async function handleEventCommand(interaction, client) {
   }
 }
 
-module.exports = { eventCommand, handleEventCommand, handleAutocomplete };
+// ── Button: "Schedule Event" pressed on a template embed ────────────────────
+async function handleTemplateButton(interaction) {
+  const key      = interaction.customId.split(":")[1];
+  const template = loadEventTemplates()[key];
+  if (!template) {
+    return interaction.reply({ content: "❌ Template not found. It may have been deleted.", ephemeral: true });
+  }
+
+  const defaultStartTime = getNextHourUtcString();
+
+  const modal = new ModalBuilder()
+    .setCustomId(`schedule_modal:${key}`)
+    .setTitle(`Schedule: ${template.name}`)
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("start_time")
+          .setLabel("Start time (YYYY-MM-DD HH:MM UTC)")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setValue(defaultStartTime)
+          .setPlaceholder("2026-07-15 20:00"),
+      ),
+    );
+
+  await interaction.showModal(modal);
+}
+
+// ── Modal submit: date entered after clicking Schedule Event ─────────────────
+async function handleTemplateModal(interaction, client) {
+  const key      = interaction.customId.split(":")[1];
+  const template = loadEventTemplates()[key];
+  if (!template) {
+    return interaction.reply({ content: "❌ Template not found. It may have been deleted.", ephemeral: true });
+  }
+
+  const startStr = interaction.fields.getTextInputValue("start_time");
+  const startDate = parseUtcDatetime(startStr);
+  if (!startDate) {
+    return interaction.reply({ content: "❌ Invalid start time — use `YYYY-MM-DD HH:MM` (UTC).", ephemeral: true });
+  }
+  if (startDate.getTime() <= Date.now()) {
+    return interaction.reply({ content: "❌ Start time must be in the future.", ephemeral: true });
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+  try {
+    const guild = await client.guilds.fetch(GUILD_ID);
+    await createDiscordEvent(guild, {
+      name:            template.name,
+      description:     template.description,
+      location:        template.location,
+      durationMinutes: template.durationMinutes,
+      startTimestamp:  startDate.getTime(),
+    });
+    return interaction.editReply({
+      content: `✅ Event **${template.name}** scheduled for <t:${Math.floor(startDate.getTime() / 1000)}:F>.`,
+    });
+  } catch (err) {
+    console.error("Failed to create event from template:", err);
+    return interaction.editReply({ content: "❌ Failed to create the event. Ensure the bot has the **Manage Events** permission." });
+  }
+}
+
+module.exports = { eventCommand, handleEventCommand, handleAutocomplete, handleTemplateButton, handleTemplateModal };

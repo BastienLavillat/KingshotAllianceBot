@@ -9,7 +9,7 @@ const recurringHandler    = require("./handlers/recurring");
 const dailySyncHandler    = require("./handlers/dailySync");
 
 const { reminderCommand, handleReminderCommand } = require("./commands/reminder");
-const { eventCommand, handleEventCommand, handleAutocomplete } = require("./commands/event");
+const { eventCommand, handleEventCommand, handleAutocomplete, handleTemplateButton, handleTemplateModal } = require("./commands/event");
 const { rulesCommand, handleRulesCommand } = require("./commands/rules");
 
 console.log("BOT_TOKEN present:", !!process.env.BOT_TOKEN);
@@ -33,6 +33,16 @@ dailySyncHandler.register(client);
 client.on("interactionCreate", async (interaction) => {
   if (interaction.isAutocomplete()) {
     handleAutocomplete(interaction).catch(console.error);
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId.startsWith("schedule_template:")) {
+    handleTemplateButton(interaction).catch(console.error);
+    return;
+  }
+
+  if (interaction.isModalSubmit() && interaction.customId.startsWith("schedule_modal:")) {
+    handleTemplateModal(interaction, client).catch(console.error);
     return;
   }
 

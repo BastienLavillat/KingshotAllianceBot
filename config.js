@@ -15,6 +15,7 @@ const ALLIANCE_RULES_FILE       = "alliance_rules.txt";    // edit this file to 
 const SENT_CODES_FILE           = "sent_codes.json";
 const REMINDER_CHANNEL_ID       = "1520880291470639256";   // channel to post event reminders — set to null to disable
 const REMINDER_CONFIG_FILE      = "reminder_config.json";  // persisted reminder settings (edit intervals via /reminder command)
+const TEMPLATES_CHANNEL_ID      = "1524308730173456534";   // channel to display event template embeds — set to channel ID string to enable
 const EVENT_TEMPLATES_FILE      = "event_templates.json";  // event templates
 const RECURRING_EVENTS_FILE     = "recurring_events.json"; // recurring event schedules
 // ============================================================
@@ -34,6 +35,7 @@ module.exports = {
   SENT_CODES_FILE,
   REMINDER_CHANNEL_ID,
   REMINDER_CONFIG_FILE,
+  TEMPLATES_CHANNEL_ID,
   EVENT_TEMPLATES_FILE,
   RECURRING_EVENTS_FILE,
 };

@@ -1,3 +1,11 @@
+const {
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+} = require("discord.js");
+const { TEMPLATES_CHANNEL_ID } = require("../config");
+
 // Parse "YYYY-MM-DD HH:MM" as UTC; returns a Date or null
 function parseUtcDatetime(str) {
   const m = str.trim().match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/);
@@ -34,4 +42,55 @@ function formatIntervalLabel(intervalMin) {
   return `${intervalMin} minute(s)`;
 }
 
-module.exports = { parseUtcDatetime, createDiscordEvent, formatIntervalDays, formatIntervalLabel };
+// Build a rich embed for a single event template
+function buildTemplateEmbed(key, template) {
+  return new EmbedBuilder()
+    .setTitle(template.name)
+    .setColor(0x5865f2)
+    .addFields(
+      { name: "Duration",    value: `${template.durationMinutes} min`, inline: true },
+      { name: "Location",    value: template.location || "TBD",         inline: true },
+      { name: "Description", value: template.description || "—",        inline: false },
+    )
+    .setFooter({ text: `Template key: ${key}` });
+}
+
+// (Re-)post one embed per template in the dedicated templates channel.
+// All previous bot messages in that channel are replaced.
+async function refreshTemplatesChannel(client, templates) {
+  if (!TEMPLATES_CHANNEL_ID) return;
+
+  const channel = await client.channels.fetch(TEMPLATES_CHANNEL_ID).catch(() => null);
+  if (!channel) return;
+
+  // Remove existing bot messages (up to 100)
+  const fetched    = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+  if (fetched) {
+    const botMsgs = [...fetched.values()].filter((m) => m.author.id === client.user.id);
+    if (botMsgs.length > 0) {
+      // bulkDelete only works for messages < 14 days old
+      await channel.bulkDelete(botMsgs).catch(async () => {
+        for (const m of botMsgs) await m.delete().catch(() => {});
+      });
+    }
+  }
+
+  const keys = Object.keys(templates);
+  if (keys.length === 0) {
+    await channel.send({ content: "📋 No event templates saved yet. Use `/event template save` to add one." });
+    return;
+  }
+
+  for (const key of keys) {
+    const embed = buildTemplateEmbed(key, templates[key]);
+    const row   = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`schedule_template:${key}`)
+        .setLabel("Schedule Event")
+        .setStyle(ButtonStyle.Primary),
+    );
+    await channel.send({ embeds: [embed], components: [row] });
+  }
+}
+
+module.exports = { parseUtcDatetime, createDiscordEvent, formatIntervalDays, formatIntervalLabel, buildTemplateEmbed, refreshTemplatesChannel };
