@@ -31,7 +31,7 @@ function register(client) {
 
       await channel.send(
         `👑 Welcome to **${guild.name}**, <@${member.id}>!\n\n` +
-        `Please send your **Kingshot Player ID** here to complete your registration.\n` +
+        `Please send your **Kingshot Player ID** here to complete your registration and access to the server.\n` +
         `You can find it by tapping your avatar in the top-left corner of the game.`
       );
     } catch (err) {
