@@ -1,14 +1,12 @@
 const cron = require("node-cron");
 const { GUILD_ID, LOG_CHANNEL_ID } = require("../config");
 const { loadData, saveData } = require("../utils/db");
-const { fetchKingshotPlayer, checkGiftCodes } = require("../utils/api");
+const { fetchKingshotPlayer } = require("../utils/api");
 
 function register(client) {
   // Daily sync — every day at 09:00
   cron.schedule("0 9 * * *", async () => {
     console.log("Running daily Kingshot name sync...");
-
-    await checkGiftCodes(client);
 
     const db = loadData();
     const guild = await client.guilds.fetch(GUILD_ID);

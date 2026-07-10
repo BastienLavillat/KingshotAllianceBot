@@ -7,6 +7,7 @@ const verificationHandler = require("./handlers/verification");
 const remindersHandler    = require("./handlers/reminders");
 const recurringHandler    = require("./handlers/recurring");
 const dailySyncHandler    = require("./handlers/dailySync");
+const giftCodesHandler    = require("./handlers/giftCodes");
 
 const { reminderCommand, handleReminderCommand } = require("./commands/reminder");
 const { eventCommand, handleEventCommand, handleAutocomplete, handleTemplateButton, handleTemplateModal } = require("./commands/event");
@@ -29,6 +30,7 @@ verificationHandler.register(client);
 remindersHandler.register(client);
 recurringHandler.register(client);
 dailySyncHandler.register(client);
+giftCodesHandler.register(client);
 
 client.on("interactionCreate", async (interaction) => {
   if (interaction.isAutocomplete()) {
