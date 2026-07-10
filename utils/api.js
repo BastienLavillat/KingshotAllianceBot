@@ -49,16 +49,12 @@ async function checkGiftCodes(client) {
     for (const [index, entry] of newCodeEntries.entries()) {
       const code = entry.code;
       const createdAt = formatDiscordTimestamp(entry.createdAt, "f");
-      const expiresAt = formatDiscordTimestamp(entry.expiresAt, "f");
-      const mentionPrefix = index === 0 ? "@everyone " : "";
 
       await channel.send({
         content:
-          `${mentionPrefix}🎁 **New Kingshot Gift Code**\n` +
+          `@everyone 🎁 **New Kingshot Gift Code**\n` +
           `Code: \`${code}\`\n` +
-          `Created: ${createdAt}\n` +
-          `Expires: ${expiresAt}`,
-        allowedMentions: index === 0 ? { parse: ["everyone"] } : { parse: [] },
+          `Created: ${createdAt}`
       });
 
       sentCodes.add(code);
