@@ -12,6 +12,9 @@ const UNVERIFIED_ROLE_ID        = "1516820807295307806";   // role assigned on j
 const DB_FILE                   = path.join(DATA_DIR, "members_info.json");
 const GIFT_CODE_CHANNEL_ID      = "1516080050250715237";   // channel to post gift codes — set to null to disable
 const GIFT_CODE_CHECK_CRON      = "0 * * * *";             // gift code check schedule
+const AUTO_REDEEM_GIFT_CODES    = (process.env.AUTO_REDEEM_GIFT_CODES || "true").toLowerCase() === "true";
+const GIFT_CODE_REDEEM_ENDPOINT = process.env.GIFT_CODE_REDEEM_ENDPOINT || "https://kingshot.net/api/gift-code-redeem";
+const GIFT_CODE_REDEEM_TIMEOUT_MS = Number(process.env.GIFT_CODE_REDEEM_TIMEOUT_MS || 15000);
 const DISCORD_RULES_CHANNEL_ID  = "1521537057371983872";   // channel where the bot posts server rules
 const DISCORD_RULES_FILE        = path.join(DATA_DIR, "discord_rules.txt");     // edit this file to update the rules content
 const ALLIANCE_RULES_CHANNEL_ID = "1521537244916355233";   // channel where the bot posts alliance rules
@@ -34,6 +37,9 @@ module.exports = {
   DB_FILE,
   GIFT_CODE_CHANNEL_ID,
   GIFT_CODE_CHECK_CRON,
+  AUTO_REDEEM_GIFT_CODES,
+  GIFT_CODE_REDEEM_ENDPOINT,
+  GIFT_CODE_REDEEM_TIMEOUT_MS,
   DISCORD_RULES_CHANNEL_ID,
   DISCORD_RULES_FILE,
   ALLIANCE_RULES_CHANNEL_ID,
