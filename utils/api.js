@@ -6,6 +6,7 @@ const {
   GIFT_CODE_REDEEM_ENDPOINT,
   GIFT_CODE_REDEEM_TIMEOUT_MS,
 } = require("../config");
+const { MessageFlags } = require("discord.js");
 const { loadData, loadSentCodes, saveSentCodes } = require("./db");
 
 function formatDiscordTimestamp(value, style = "F") {
@@ -146,7 +147,10 @@ async function sendAutoRedeemFailuresToLogs(guild, code, stats) {
     content = `${content.slice(0, 1897)}...`;
   }
 
-  await logChannel.send({ content });
+  await logChannel.send({
+    content,
+    flags: MessageFlags.SuppressNotifications,
+  });
 }
 
 async function checkGiftCodes(client) {
