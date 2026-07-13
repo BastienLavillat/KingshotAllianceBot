@@ -27,6 +27,15 @@ async function fetchKingshotPlayer(kingshotId) {
   return data.data.name; // adjust field name if needed
 }
 
+function normalizeGiftCode(value) {
+  if (typeof value !== "string") return "";
+  return value.trim();
+}
+
+function isValidGiftCode(value) {
+  return /^[A-Za-z]+[0-9]+$/.test(normalizeGiftCode(value));
+}
+
 function parseRedeemResult(payload) {
   if (!payload || typeof payload !== "object") {
     return { success: false, message: "Invalid redeem API response." };
@@ -153,6 +162,27 @@ async function sendAutoRedeemFailuresToLogs(guild, code, stats) {
   });
 }
 
+async function sendInvalidGiftCodeToLogs(guild, code) {
+  if (!LOG_CHANNEL_ID) return;
+
+  const logChannel = guild.channels.cache.get(LOG_CHANNEL_ID) || await guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
+  if (!logChannel) {
+    console.error("Log channel not found — check LOG_CHANNEL_ID.");
+    return;
+  }
+
+  let content = `⚠️ Invalid Kingshot gift code format received: \`${code}\``;
+
+  if (content.length > 1900) {
+    content = `${content.slice(0, 1897)}...`;
+  }
+
+  await logChannel.send({
+    content,
+    flags: MessageFlags.SuppressNotifications,
+  });
+}
+
 async function checkGiftCodes(client) {
   if (!GIFT_CODE_CHANNEL_ID) return;
 
@@ -166,7 +196,10 @@ async function checkGiftCodes(client) {
     const giftCodeEntries = Array.isArray(data?.data?.giftCodes) ? data.data.giftCodes : [];
 
     const sentCodes = loadSentCodes();
-    const newCodeEntries = giftCodeEntries.filter((entry) => entry?.code && !sentCodes.has(entry.code));
+    const newCodeEntries = giftCodeEntries.filter((entry) => {
+      const code = normalizeGiftCode(entry?.code);
+      return code && !sentCodes.has(code);
+    });
 
     if (newCodeEntries.length === 0) {
       console.log("No new gift codes found.");
@@ -181,7 +214,15 @@ async function checkGiftCodes(client) {
     }
 
     for (const entry of newCodeEntries) {
-      const code = entry.code;
+      const code = normalizeGiftCode(entry.code);
+      if (!isValidGiftCode(code)) {
+        await sendInvalidGiftCodeToLogs(guild, code || String(entry.code ?? ""));
+        if (code) {
+          sentCodes.add(code);
+        }
+        continue;
+      }
+
       const createdAt = formatDiscordTimestamp(entry.createdAt, "f");
       if (AUTO_REDEEM_GIFT_CODES) {
         const stats = await autoRedeemCodeForMembers(code);
