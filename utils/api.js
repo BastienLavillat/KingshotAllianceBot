@@ -36,6 +36,11 @@ function isValidGiftCode(value) {
   return /^[A-Za-z]+[0-9]+$/.test(normalizeGiftCode(value));
 }
 
+function getGiftCodeCreatedTime(value) {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? Number.POSITIVE_INFINITY : parsed.getTime();
+}
+
 function parseRedeemResult(payload) {
   if (!payload || typeof payload !== "object") {
     return { success: false, message: "Invalid redeem API response." };
@@ -196,10 +201,12 @@ async function checkGiftCodes(client) {
     const giftCodeEntries = Array.isArray(data?.data?.giftCodes) ? data.data.giftCodes : [];
 
     const sentCodes = loadSentCodes();
-    const newCodeEntries = giftCodeEntries.filter((entry) => {
+    const newCodeEntries = giftCodeEntries
+      .filter((entry) => {
       const code = normalizeGiftCode(entry?.code);
       return code && !sentCodes.has(code);
-    });
+      })
+      .sort((left, right) => getGiftCodeCreatedTime(left?.createdAt) - getGiftCodeCreatedTime(right?.createdAt));
 
     if (newCodeEntries.length === 0) {
       console.log("No new gift codes found.");
