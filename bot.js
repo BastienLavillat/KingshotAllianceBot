@@ -10,7 +10,13 @@ const dailySyncHandler    = require("./handlers/dailySync");
 const giftCodesHandler    = require("./handlers/giftCodes");
 
 const { reminderCommand, handleReminderCommand } = require("./commands/reminder");
-const { eventCommand, handleEventCommand, handleAutocomplete, handleTemplateButton, handleTemplateModal } = require("./commands/event");
+const {
+  eventCommand,
+  handleEventCommand,
+  handleAutocomplete,
+  handleTemplateButton,
+  handleTemplateModal,
+} = require("./commands/event");
 const { rulesCommand, handleRulesCommand } = require("./commands/rules");
 const { memberCommand, handleMemberCommand } = require("./commands/member");
 

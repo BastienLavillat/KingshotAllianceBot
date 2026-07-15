@@ -16,6 +16,21 @@ function normalizeMultilineText(value) {
   return value.replace(/\\n/g, "\n");
 }
 
+function toTemplateKey(name) {
+  if (typeof name !== "string") return "";
+  return name.trim().toLowerCase().replace(/\s+/g, "_");
+}
+
+function truncateForModal(value, maxLength) {
+  const normalized = typeof value === "string" ? value : "";
+  return normalized.slice(0, maxLength);
+}
+
+function getPrefilledEventName(name) {
+  const normalized = truncateForModal(name, 100).trim();
+  return normalized || "New Event";
+}
+
 function getNextHourUtcString() {
   const now = new Date();
   const nextHour = new Date(now);
@@ -209,6 +224,13 @@ async function handleEventCommand(interaction, client) {
     durationMinutes = interaction.options.getInteger("duration")   ?? durationMinutes;
     location        = interaction.options.getString("location")    ?? location ?? "TBD";
 
+    if (templateKey) {
+      return interaction.reply({
+        content: "ℹ️ Creating from templates is button-only. Use **Schedule Event** under the template message.",
+        ephemeral: true,
+      });
+    }
+
     if (!name)            return interaction.reply({ content: "❌ Provide an event `name` or choose a `template`.", ephemeral: true });
     if (!durationMinutes) return interaction.reply({ content: "❌ Provide a `duration` (minutes) or choose a `template`.", ephemeral: true });
 
@@ -236,7 +258,8 @@ async function handleEventCommand(interaction, client) {
     const description     = normalizeMultilineText(interaction.options.getString("description") ?? "");
     const location        = interaction.options.getString("location")    ?? "TBD";
 
-    const key       = rawName.toLowerCase().replace(/\s+/g, "_");
+    const key       = toTemplateKey(rawName);
+    if (!key) return interaction.reply({ content: "❌ Template name cannot be empty.", ephemeral: true });
     const templates = loadEventTemplates();
     templates[key]  = { name: rawName, description, durationMinutes, location };
     saveEventTemplates(templates);
@@ -364,11 +387,22 @@ async function handleTemplateButton(interaction) {
   }
 
   const defaultStartTime = getNextHourUtcString();
+  const modalInstanceId = Date.now().toString(36);
 
   const modal = new ModalBuilder()
-    .setCustomId(`schedule_modal:${key}`)
+    .setCustomId(`schedule_modal:${key}:${modalInstanceId}`)
     .setTitle(`Schedule: ${template.name}`)
     .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("event_name")
+          .setLabel("Event name")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMinLength(1)
+          .setMaxLength(100)
+          .setValue(getPrefilledEventName(template.name))
+      ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId("start_time")
@@ -377,6 +411,33 @@ async function handleTemplateButton(interaction) {
           .setRequired(true)
           .setValue(defaultStartTime)
           .setPlaceholder("2026-07-15 20:00"),
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("event_description")
+          .setLabel("Description")
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(false)
+          .setMaxLength(1000)
+          .setValue((template.description || "").slice(0, 1000)),
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("event_duration")
+          .setLabel("Duration (minutes)")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setValue(String(template.durationMinutes ?? ""))
+          .setPlaceholder("60"),
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("event_location")
+          .setLabel("Location")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false)
+          .setMaxLength(100)
+          .setValue(truncateForModal(template.location || "TBD", 100)),
       ),
     );
 
@@ -391,7 +452,21 @@ async function handleTemplateModal(interaction, client) {
     return interaction.reply({ content: "❌ Template not found. It may have been deleted.", ephemeral: true });
   }
 
-  const startStr = interaction.fields.getTextInputValue("start_time");
+  const name = interaction.fields.getTextInputValue("event_name").trim();
+  const startStr = interaction.fields.getTextInputValue("start_time").trim();
+  const description = normalizeMultilineText(interaction.fields.getTextInputValue("event_description") ?? "");
+  const durationRaw = interaction.fields.getTextInputValue("event_duration").trim();
+  const locationRaw = interaction.fields.getTextInputValue("event_location") ?? "";
+  const location = locationRaw.trim() || "TBD";
+  const durationMinutes = Number.parseInt(durationRaw, 10);
+
+  if (!name) {
+    return interaction.reply({ content: "❌ Event name cannot be empty.", ephemeral: true });
+  }
+  if (!Number.isInteger(durationMinutes) || durationMinutes < 1) {
+    return interaction.reply({ content: "❌ Duration must be a whole number of minutes (>= 1).", ephemeral: true });
+  }
+
   const startDate = parseUtcDatetime(startStr);
   if (!startDate) {
     return interaction.reply({ content: "❌ Invalid start time — use `YYYY-MM-DD HH:MM` (UTC).", ephemeral: true });
@@ -404,14 +479,14 @@ async function handleTemplateModal(interaction, client) {
   try {
     const guild = await client.guilds.fetch(GUILD_ID);
     await createDiscordEvent(guild, {
-      name:            template.name,
-      description:     template.description,
-      location:        template.location,
-      durationMinutes: template.durationMinutes,
+      name,
+      description,
+      location,
+      durationMinutes,
       startTimestamp:  startDate.getTime(),
     });
     return interaction.editReply({
-      content: `✅ Event **${template.name}** scheduled for <t:${Math.floor(startDate.getTime() / 1000)}:F>.`,
+      content: `✅ Event **${name}** scheduled for <t:${Math.floor(startDate.getTime() / 1000)}:F>.`,
     });
   } catch (err) {
     console.error("Failed to create event from template:", err);
@@ -419,4 +494,10 @@ async function handleTemplateModal(interaction, client) {
   }
 }
 
-module.exports = { eventCommand, handleEventCommand, handleAutocomplete, handleTemplateButton, handleTemplateModal };
+module.exports = {
+  eventCommand,
+  handleEventCommand,
+  handleAutocomplete,
+  handleTemplateButton,
+  handleTemplateModal,
+};
