@@ -12,6 +12,7 @@ const giftCodesHandler    = require("./handlers/giftCodes");
 const { reminderCommand, handleReminderCommand } = require("./commands/reminder");
 const { eventCommand, handleEventCommand, handleAutocomplete, handleTemplateButton, handleTemplateModal } = require("./commands/event");
 const { rulesCommand, handleRulesCommand } = require("./commands/rules");
+const { memberCommand, handleMemberCommand } = require("./commands/member");
 
 console.log("BOT_TOKEN present:", !!process.env.BOT_TOKEN);
 
@@ -61,6 +62,10 @@ client.on("interactionCreate", async (interaction) => {
   if (interaction.commandName === "rules") {
     handleRulesCommand(interaction, client).catch(console.error);
   }
+
+  if (interaction.commandName === "member") {
+    handleMemberCommand(interaction, client).catch(console.error);
+  }
 });
 
 // ─────────────────────────────────────────────
@@ -73,7 +78,7 @@ client.once("clientReady", async () => {
   try {
     const rest = new REST().setToken(BOT_TOKEN);
     await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), {
-      body: [reminderCommand.toJSON(), eventCommand.toJSON(), rulesCommand.toJSON()],
+      body: [reminderCommand.toJSON(), eventCommand.toJSON(), rulesCommand.toJSON(), memberCommand.toJSON()],
     });
     console.log("Slash commands registered.");
   } catch (err) {
