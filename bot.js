@@ -8,6 +8,7 @@ const remindersHandler    = require("./handlers/reminders");
 const recurringHandler    = require("./handlers/recurring");
 const dailySyncHandler    = require("./handlers/dailySync");
 const giftCodesHandler    = require("./handlers/giftCodes");
+const { handleForceValidGiftCodeButton } = require("./utils/api");
 
 const { reminderCommand, handleReminderCommand } = require("./commands/reminder");
 const {
@@ -48,6 +49,15 @@ client.on("interactionCreate", async (interaction) => {
   if (interaction.isButton() && interaction.customId.startsWith("schedule_template:")) {
     handleTemplateButton(interaction).catch(console.error);
     return;
+  }
+
+  if (interaction.isButton()) {
+    const handled = await handleForceValidGiftCodeButton(interaction).catch((err) => {
+      console.error(err);
+      return false;
+    });
+
+    if (handled) return;
   }
 
   if (interaction.isModalSubmit() && interaction.customId.startsWith("schedule_modal:")) {

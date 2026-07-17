@@ -6,8 +6,17 @@ const {
   GIFT_CODE_REDEEM_ENDPOINT,
   GIFT_CODE_REDEEM_TIMEOUT_MS,
 } = require("../config");
-const { MessageFlags } = require("discord.js");
+const {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  MessageFlags,
+  PermissionsBitField,
+} = require("discord.js");
 const { loadData, loadSentCodes, saveSentCodes } = require("./db");
+
+const FORCE_VALID_GIFT_CODE_BUTTON_ID = "gift_code_force_valid";
+const INVALID_GIFT_CODE_LOG_PREFIX = "⚠️ Suspicious Kingshot gift code format received:";
 
 function formatDiscordTimestamp(value, style = "F") {
   if (!value) return "Never";
@@ -39,6 +48,14 @@ function isValidGiftCode(value) {
 function getGiftCodeCreatedTime(value) {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? Number.POSITIVE_INFINITY : parsed.getTime();
+}
+
+function extractGiftCodeFromInvalidLogMessage(content) {
+  if (typeof content !== "string") return "";
+
+  if (!content.startsWith(INVALID_GIFT_CODE_LOG_PREFIX)) return "";
+  const match = content.match(/`([^`]*)`/);
+  return normalizeGiftCode(match?.[1] || "");
 }
 
 function parseRedeemResult(payload) {
@@ -167,6 +184,38 @@ async function sendAutoRedeemFailuresToLogs(guild, code, stats) {
   });
 }
 
+async function processGiftCodeAsValid(guild, code, createdAt, sentCodes) {
+  const normalizedCode = normalizeGiftCode(code);
+  if (!normalizedCode) return;
+
+  const channel = guild.channels.cache.get(GIFT_CODE_CHANNEL_ID) || await guild.channels.fetch(GIFT_CODE_CHANNEL_ID).catch(() => null);
+  if (!channel) {
+    console.error("Gift code channel not found — check GIFT_CODE_CHANNEL_ID.");
+    return;
+  }
+
+  if (AUTO_REDEEM_GIFT_CODES) {
+    const stats = await autoRedeemCodeForMembers(normalizedCode);
+    await sendAutoRedeemFailuresToLogs(guild, normalizedCode, stats);
+  }
+
+  const createdAtLabel = formatDiscordTimestamp(createdAt || new Date().toISOString(), "f");
+
+  await channel.send({
+    content:
+      `@everyone 🎁 **New Kingshot Gift Code**\n` +
+      `Code: \`${normalizedCode}\`\n` +
+      `Created: ${createdAtLabel}`
+  });
+
+  const targetSet = sentCodes || loadSentCodes();
+  targetSet.add(normalizedCode);
+
+  if (!sentCodes) {
+    saveSentCodes(targetSet);
+  }
+}
+
 async function sendInvalidGiftCodeToLogs(guild, code) {
   if (!LOG_CHANNEL_ID) return;
 
@@ -176,16 +225,72 @@ async function sendInvalidGiftCodeToLogs(guild, code) {
     return;
   }
 
-  let content = `⚠️ Invalid Kingshot gift code format received: \`${code}\``;
+  let content = `${INVALID_GIFT_CODE_LOG_PREFIX} \`${code}\``;
 
   if (content.length > 1900) {
     content = `${content.slice(0, 1897)}...`;
   }
 
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(FORCE_VALID_GIFT_CODE_BUTTON_ID)
+      .setLabel("Treat as valid + redeem")
+      .setStyle(ButtonStyle.Success)
+  );
+
   await logChannel.send({
     content,
+    components: [row],
     flags: MessageFlags.SuppressNotifications,
   });
+}
+
+async function handleForceValidGiftCodeButton(interaction) {
+  if (!interaction.isButton() || interaction.customId !== FORCE_VALID_GIFT_CODE_BUTTON_ID) return false;
+
+  const hasPermission = interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild);
+  if (!hasPermission) {
+    await interaction.reply({
+      content: "You need the Manage Server permission to approve suspicious gift codes.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
+
+  const message = interaction.message;
+  const code = extractGiftCodeFromInvalidLogMessage(message?.content || "");
+
+  if (!code) {
+    await interaction.reply({
+      content: "Could not parse the gift code from this log message.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
+
+  if (message.content.includes("considered a correct gift code")) {
+    await interaction.reply({
+      content: "This suspicious gift code was already approved.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  await processGiftCodeAsValid(interaction.guild, code, new Date().toISOString());
+
+  const approvalNote = `✅ Manually approved by <@${interaction.user.id}> and considered a correct gift code.`;
+  await message.edit({
+    content: `${message.content}\n${approvalNote}`,
+    components: [],
+  });
+
+  await interaction.editReply({
+    content: `Approved \`${code}\`. Posted in <#${GIFT_CODE_CHANNEL_ID}> and auto-redeem was triggered.`,
+  });
+
+  return true;
 }
 
 async function checkGiftCodes(client) {
@@ -214,11 +319,6 @@ async function checkGiftCodes(client) {
     }
 
     const guild = await client.guilds.fetch(GUILD_ID);
-    const channel = guild.channels.cache.get(GIFT_CODE_CHANNEL_ID);
-    if (!channel) {
-      console.error("Gift code channel not found — check GIFT_CODE_CHANNEL_ID.");
-      return;
-    }
 
     for (const entry of newCodeEntries) {
       const code = normalizeGiftCode(entry.code);
@@ -230,20 +330,7 @@ async function checkGiftCodes(client) {
         continue;
       }
 
-      const createdAt = formatDiscordTimestamp(entry.createdAt, "f");
-      if (AUTO_REDEEM_GIFT_CODES) {
-        const stats = await autoRedeemCodeForMembers(code);
-        await sendAutoRedeemFailuresToLogs(guild, code, stats);
-      }
-
-      await channel.send({
-        content:
-          `@everyone 🎁 **New Kingshot Gift Code**\n` +
-          `Code: \`${code}\`\n` +
-          `Created: ${createdAt}`
-      });
-
-      sentCodes.add(code);
+      await processGiftCodeAsValid(guild, code, entry.createdAt, sentCodes);
     }
 
     saveSentCodes(sentCodes);
@@ -254,4 +341,8 @@ async function checkGiftCodes(client) {
   }
 }
 
-module.exports = { fetchKingshotPlayer, checkGiftCodes };
+module.exports = {
+  fetchKingshotPlayer,
+  checkGiftCodes,
+  handleForceValidGiftCodeButton,
+};
