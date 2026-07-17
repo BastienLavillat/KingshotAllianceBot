@@ -33,7 +33,7 @@ function normalizeGiftCode(value) {
 }
 
 function isValidGiftCode(value) {
-  return /^[A-Za-z]+[0-9]+$/.test(normalizeGiftCode(value));
+  return /^[A-Z]+[0-9]*$/.test(normalizeGiftCode(value));
 }
 
 function getGiftCodeCreatedTime(value) {
